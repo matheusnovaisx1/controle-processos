@@ -26,19 +26,23 @@ const db  = getDatabase(app);
 const ROOT = "mpa";
 
 let D = { names:["Dani","Clara","Davi","Patrícia","Eva"], today:{}, status:{}, history:[], lastUpdated:null };
-let _suppress = false;
+let _localWrite = false; // flag: escrita local em curso, ignora echo do Firebase
 let _lastKey = null;
 
-window._fbSet = async (newD) => {
-  _suppress = true;
+// Escreve no Firebase E renderiza imediatamente — não espera confirmação
+window._fbSet = (newD) => {
   newD.lastUpdated = Date.now();
   D = newD;
-  await set(ref(db, ROOT), newD);
-  _suppress = false;
+  window._render();          // render local instantâneo
+  _localWrite = true;
+  set(ref(db, ROOT), newD).finally(() => {
+    // Após confirmação do Firebase, libera escuta normalmente
+    setTimeout(() => { _localWrite = false; }, 300);
+  });
 };
 
 onValue(ref(db, ROOT), (snap) => {
-  if (_suppress) return;
+  if (_localWrite) return;   // ignora echo da própria escrita
   const val = snap.val();
   if (val) {
     D = val;
@@ -56,7 +60,7 @@ onValue(ref(db, ROOT), (snap) => {
   _lastKey = todayKey;
   window._render();
   window.setConnected(true);
-}, (err) => { window.setConnected(false); });
+}, () => { window.setConnected(false); });
 
 window._getD   = () => D;
 window._cloneD = () => JSON.parse(JSON.stringify(D));
@@ -155,14 +159,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
 .si-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.7px;margin-top:5px;}
 .stat-divider{width:1px;height:36px;background:rgba(255,255,255,.07);align-self:center;}
 
-/* RANKING strip */
-.ranking-bar{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 16px;margin-bottom:1.5rem;flex-wrap:wrap;}
-.ranking-label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;flex-shrink:0;}
-.ranking-chips{display:flex;gap:6px;flex-wrap:wrap;}
-.rank-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:4px 10px;border-radius:20px;border:1px solid var(--line2);background:var(--bg3);color:var(--text2);}
-.rank-chip.top{border-color:rgba(46,184,122,.3);background:var(--accent-bg);color:var(--accent);}
-.rank-chip .medal{font-size:13px;}
-.ranking-empty{font-size:12px;color:var(--text3);}
+
 
 /* GRID SECTION LABEL */
 .grid-label{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;display:flex;align-items:center;gap:8px;}
@@ -266,7 +263,7 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
   .cards-grid{grid-template-columns:repeat(2,1fr);}
   .hist-row{grid-template-columns:1fr;gap:6px;}
   .hr-total{text-align:left;}
-  .ranking-bar{display:none;}
+
 }
 </style>
 </head>
@@ -321,12 +318,6 @@ body::before{content:'';position:fixed;inset:0;background-image:url("data:image/
       <div class="stat-divider"></div>
       <div class="stat-item"><div class="si-val" id="s-dias">0</div><div class="si-label">Dias reg.</div></div>
     </div>
-  </div>
-
-  <!-- Ranking -->
-  <div class="ranking-bar" id="ranking-bar">
-    <span class="ranking-label">Ranking hoje</span>
-    <div class="ranking-chips" id="ranking-chips"><span class="ranking-empty">Nenhum processo atribuído ainda.</span></div>
   </div>
 
   <!-- Cards presentes -->
@@ -441,12 +432,6 @@ window._render=function(){
   const media=presentCount>0?(total/presentCount):0;
   document.getElementById('s-media').textContent=media>0?media.toFixed(1):'—';
   document.getElementById('s-dias').textContent=(D.history||[]).length;
-
-  // ranking
-  const ranked=[...D.names].filter(n=>!D.status[n]||D.status[n]==='active').map(n=>({n,c:D.today[n]||0})).sort((a,b)=>b.c-a.c);
-  const rc=document.getElementById('ranking-chips');
-  if(total===0){rc.innerHTML='<span class="ranking-empty">Nenhum processo atribuído ainda.</span>';}
-  else{rc.innerHTML=ranked.map((x,i)=>`<span class="rank-chip ${i===0&&x.c>0?'top':''}">${i===0&&x.c>0?'<span class="medal">🥇</span>':i===1&&x.c>0?'<span class="medal">🥈</span>':i===2&&x.c>0?'<span class="medal">🥉</span>':''} ${x.n}: ${x.c}</span>`).join('');}
 
   // split active / absent
   const activeNames=D.names.filter(n=>!D.status[n]||D.status[n]==='active');
